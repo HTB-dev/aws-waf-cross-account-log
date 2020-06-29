@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  BucketArn:
+    Default: "arn:aws:s3:::your-bucket-name"
+    Description: "Please enter the ARN of the destination S3"
+    Type: String
+  StreamName:
+    Default: "aws-waf-logs-XXXX"
+    Description: "Enter a name for the delivery stream. The name must start with aws-waf-logs- and end with an arbitrary suffix. For example, it's aws-waf-logs-demo"
+    Type: String
+  IAMRoleName:
+    Default: 'FirehoseToCrossAccountS3Role'
+    Description: "Please enter the name of the IAM Role that this cloudformation stack will generate."
+    Type: String
+  IAMPolicyName:
+    Default: 'firehose_delivery_cross_account_policy'
+    Description: "Please enter the name of the IAM Policy that this cloudformation stack will generate."
+    Type: String
+Resources:
+  Stream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties: 
+      DeliveryStreamName: !Ref StreamName
+      DeliveryStreamType: DirectPut
+      S3DestinationConfiguration: 
+        BucketARN: !Ref BucketArn
+        BufferingHints: 
+          IntervalInSeconds: 300
+          SizeInMBs: 5
+        CloudWatchLoggingOptions:
+          Enabled: True
+          LogGroupName: /aws/kinesisfirehose/aws-waf-XXXX # Enter Log Group Name
+          LogStreamName: XXXX # Enter Stream Name
+        CompressionFormat: 'GZIP'
+        ErrorOutputPrefix: !Join
+          - ''
+          - - 'AWSLogs/'
+            - !Ref 'AWS::AccountId'
+            - '/WAF-error/'
+            - !Ref 'AWS::Region'
+            - '/'
+        Prefix: !Join
+          - ''
+          - - 'AWSLogs/'
+            - !Ref 'AWS::AccountId'
+            - '/WAF/'
+            - !Ref "AWS::Region"
+            - '/'
+        RoleARN: !GetAtt deliveryRole.Arn
+
+  deliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref IAMRoleName
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: 'firehose.amazonaws.com'
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                'sts:ExternalId': !Ref 'AWS::AccountId'
+      Path: '/'
+      Policies:
+        - PolicyName: !Ref IAMPolicyName
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:AbortMultipartUpload'
+                  - 's3:GetBucketLocation'
+                  - 's3:GetObject'
+                  - 's3:ListBucket'
+                  - 's3:ListBucketMultipartUploads'
+                  - 's3:PutObject'
+                  - 's3:PutObjectAcl'
+                Resource:
+                  - !Ref BucketArn
+                  - !Join 
+                    - ''
+                    - - !Ref BucketArn
+                      - '/*'
+              - Effect: Allow
+                Action: 'logs:PutLogEvents'
+                Resource: 
+                - !Join 
+                    - ''
+                    - - 'arn:aws:logs:'
+                      - !Ref 'AWS::Region'
+                      - ':'
+                      - !Ref 'AWS::AccountId'
+                      - ':log-group:/aws/kinesisfirehose'
+                      - ':log-stream:*'
+
+Outputs:
+  StreamName:
+    Value: !Ref Stream
+    Description: Delivery Stream Name
+  RoleARN:
+    Description: Please tell him the ARN of the IAM Role
+    Value: !GetAtt deliveryRole.Arn
+
+
